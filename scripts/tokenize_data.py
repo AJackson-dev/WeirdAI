@@ -5,13 +5,17 @@ from weird_ai.tokenizer import SimpleCharacterTokenizer
 Convert text into tokens
 """
 def main():
+    #Makes sure there is a directory for processed data
     PROCESSED_DATA_DIR.mkdir(parents=True, exist_ok=True)
 
+    #Reads the processed text
     text = SAMPLE_LYRICS_FILE.read_text(encoding="utf-8")
 
+    #Initialize tokenizer and encode the processed text
     tokenizer = SimpleCharacterTokenizer(text)
     tokens = tokenizer.encode(text)
 
+    #Write the tokenized text
     TOKENS_FILE.write_text(
         " ".join(str(token) for token in tokens),
         encoding="utf-8"
