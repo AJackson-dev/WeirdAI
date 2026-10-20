@@ -32,7 +32,17 @@ def build_reasoning_prompt(user_prompt):
     # 3. Include the original user_prompt.
     # 4. Include a clear "Final Answer:" section.
 
-    raise NotImplementedError("Implement build_reasoning_prompt.")
+    reasoning_prompt = (
+        "You are Weird AI, a parody lyric generator.\n"
+        "Task:\n"
+        + user_prompt + "\n"
+        "Think step-by-step. First understand the request, identify any "
+        "constraints, and plan your response.\n"
+        "Final Answer:"
+    )
+
+    return reasoning_prompt
+
 
 
 def build_parody_reasoning_prompt(topic):
@@ -60,7 +70,19 @@ def build_parody_reasoning_prompt(topic):
     #    - Write the final parody lyrics.
     # 4. A clear "Final Parody:" section.
 
-    raise NotImplementedError("Implement build_parody_reasoning_prompt.")
+    parody_prompt = (
+        "You are Weird AI, a parody lyric generator.\n\n"
+        "Topic:\n"
+        + topic + "\n\n"
+        "Think step-by-step using these planning steps:\n"
+        "1. Identify the topic.\n"
+        "2. Identify funny ideas or exaggerations.\n"
+        "3. Identify possible rhymes.\n"
+        "4. Write the final parody lyrics.\n\n"
+        "Final Parody:"
+    )
+
+    return parody_prompt
 
 
 def build_closed_world_prompt(premises, question):
@@ -84,8 +106,22 @@ def build_closed_world_prompt(premises, question):
     # 3. Include the question.
     # 4. Include a "Reasoning:" section and an "Answer:" section.
 
-    raise NotImplementedError("Implement build_closed_world_prompt.")
+    premise_list = ""
+    for premise in premises:
+        premise_list += "- " + premise + "\n"
 
+    closed_world_prompt = (
+        "Use only the provided premises below. Do not use any outside "
+        "knowledge, even if a premise seems false in the real world.\n\n"
+        "Premises:\n"
+        + premise_list + "\n"
+        "Question:\n"
+        + question + "\n"
+        "Reasoning:\n"
+        "Answer:"
+    )
+
+    return closed_world_prompt
 
 def build_open_world_prompt(premises, question):
     """
@@ -110,6 +146,22 @@ def build_open_world_prompt(premises, question):
     # 4. Include the question.
     # 5. Include a "Reasoning:" section and an "Answer:" section.
 
-    raise NotImplementedError("Implement build_open_world_prompt.")
+   
+    premise_list = ""
+    for premise in premises:
+        premise_list += "- " + premise + "\n"
 
+    open_world_prompt = (
+        "You may use relevant background knowledge in addition to the "
+        "premises below. Check whether any premise conflicts with known "
+        "facts, and point out any contradiction you find.\n"
+        "Premises:\n"
+        + premise_list + "\n"
+        "Question:\n"
+        + question + "\n"
+        "Reasoning:\n"
+        "Answer:"
+    )
+
+    return open_world_prompt
 
