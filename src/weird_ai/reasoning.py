@@ -111,7 +111,7 @@ def build_closed_world_prompt(premises, question):
         premise_list += "- " + premise + "\n"
 
     closed_world_prompt = (
-        "Use only the premises provided below. Do not use any outside "
+        "Use only the provided premises below. Do not use any outside "
         "knowledge, even if a premise seems false in the real world.\n"
         "Premises:\n"
         + premise_list + "\n"
