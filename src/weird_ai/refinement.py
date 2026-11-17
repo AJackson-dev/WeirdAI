@@ -48,7 +48,30 @@ def get_score(evaluation: dict, score_key: str = "overall_score") -> float:
     # 2. Convert it to a float.
     # 3. If the key is missing or cannot be converted, return 0.0.
 
-    raise NotImplementedError("Implement get_score.")
+    if not isinstance(evaluation, dict):
+        return 0.0
+
+    value = evaluation.get(score_key)
+    if value is None:
+        return 0.0
+
+    try:
+        return float(value)
+    except (TypeError, ValueError):
+        return 0.0
+
+
+def _format_detail(value: Any) -> str:
+    """Format one evaluation detail for the refinement prompt."""
+
+    if isinstance(value, float):
+        return f"{value:.3f}"
+    if isinstance(value, dict):
+        inner = ", ".join(f"{k}={_format_detail(v)}" for k, v in value.items())
+        return "{" + inner + "}"
+    if isinstance(value, (list, tuple)):
+        return ", ".join(_format_detail(v) for v in value)
+    return str(value)
 
 
 def build_refinement_prompt(
@@ -73,7 +96,42 @@ def build_refinement_prompt(
     #
     # Keep the prompt specific. "Make it better" is too vague.
 
-    raise NotImplementedError("Implement build_refinement_prompt.")
+    score = get_score(evaluation, score_key)
+
+    focus = focus or [
+        "stronger, more natural end rhymes",
+        "more consistent syllable counts between matching lines",
+        "clearer verse/chorus structure",
+    ]
+    preserve = preserve or [
+        "the original topic",
+        "the comedic tone",
+        "the approximate length",
+    ]
+
+    # Every evaluation key except the overall score becomes a detail line.
+    detail_lines = [
+        f"- {key}: {_format_detail(value)}"
+        for key, value in (evaluation or {}).items()
+        if key != score_key
+    ]
+    details_block = "\n".join(detail_lines) if detail_lines else "- (no extra details)"
+
+    focus_block = "\n".join(f"- {item}" for item in focus)
+    preserve_block = "\n".join(f"- {item}" for item in preserve)
+
+    return (
+        "You are revising a parody song.\n\n"
+        f"Original request:\n{original_prompt.strip()}\n\n"
+        f"Current lyrics:\n{current_text.strip()}\n\n"
+        f"Current {score_key}: {score:.3f}\n\n"
+        f"Evaluation details:\n{details_block}\n\n"
+        f"Improve these specific things:\n{focus_block}\n\n"
+        f"Keep these the same:\n{preserve_block}\n\n"
+        "Rewrite the lyrics to fix the weaknesses above. "
+        "Return ONLY the revised lyrics, with no explanation, title, or notes.\n\n"
+        "Revised lyrics:\n"
+    )
 
 
 def refine_once(
@@ -88,6 +146,8 @@ def refine_once(
     score_key: str = "overall_score",
     focus: Optional[list[str]] = None,
     preserve: Optional[list[str]] = None,
+    iteration: int = 1,
+    current_evaluation: Optional[dict] = None,
     **kwargs: Any,
 ) -> RefinementStep:
     """Run one self-refinement step."""
@@ -103,7 +163,50 @@ def refine_once(
     # This function should not decide whether to continue the full loop.
     # It only performs one attempt.
 
-    raise NotImplementedError("Implement refine_once.")
+    # 1. Reuse a known evaluation if the caller has one (saves a scoring pass).
+    if current_evaluation is None:
+        current_evaluation = evaluation_func(current_text)
+    previous_score = get_score(current_evaluation, score_key)
+
+    # 2.
+    prompt = build_refinement_prompt(
+        original_prompt,
+        current_text,
+        current_evaluation,
+        focus=focus,
+        preserve=preserve,
+        score_key=score_key,
+    )
+
+    # 3.
+    revised_text = generation_func(
+        prompt,
+        temperature=temperature,
+        top_p=top_p,
+        max_new_tokens=max_new_tokens,
+        **kwargs,
+    )
+    revised_text = (revised_text or "").strip()
+
+    # 4.
+    revised_evaluation = evaluation_func(revised_text) if revised_text else {}
+    revised_score = get_score(revised_evaluation, score_key)
+
+    # 5. "accepted" here means strictly better. The loop makes the final
+    #    keep/discard decision with choose_better_text.
+    accepted = revised_score > previous_score
+
+    # 6.
+    return RefinementStep(
+        iteration=iteration,
+        prompt=prompt,
+        previous_text=current_text,
+        revised_text=revised_text,
+        previous_score=previous_score,
+        revised_score=revised_score,
+        accepted=accepted,
+        evaluation=revised_evaluation,
+    )
 
 
 def choose_better_text(
@@ -123,7 +226,21 @@ def choose_better_text(
     # 3. If require_improvement is False, accept equal scores as well.
     # 4. Return the selected text, selected evaluation, and whether the revision was accepted.
 
-    raise NotImplementedError("Implement choose_better_text.")
+    current_score = get_score(current_evaluation, score_key)
+    revised_score = get_score(revised_evaluation, score_key)
+
+    # Never accept an empty revision.
+    if not revised_text or not revised_text.strip():
+        return current_text, current_evaluation, False
+
+    if require_improvement:
+        accepted = revised_score > current_score
+    else:
+        accepted = revised_score >= current_score
+
+    if accepted:
+        return revised_text, revised_evaluation, True
+    return current_text, current_evaluation, False
 
 
 def should_continue(
@@ -143,7 +260,34 @@ def should_continue(
     # 3. Stop if stop_on_no_improvement is True and last_improved is False.
     # 4. Otherwise continue.
 
-    raise NotImplementedError("Implement should_continue.")
+    return _stop_reason(
+        iteration=iteration,
+        max_iterations=max_iterations,
+        current_score=current_score,
+        target_score=target_score,
+        last_improved=last_improved,
+        stop_on_no_improvement=stop_on_no_improvement,
+    ) is None
+
+
+def _stop_reason(
+    *,
+    iteration: int,
+    max_iterations: int,
+    current_score: float,
+    target_score: Optional[float],
+    last_improved: bool,
+    stop_on_no_improvement: bool,
+) -> Optional[str]:
+    """Return why the loop should stop, or None if it should keep going."""
+
+    if iteration >= max_iterations:
+        return "max_iterations"
+    if target_score is not None and current_score >= target_score:
+        return "target_score"
+    if stop_on_no_improvement and not last_improved:
+        return "no_improvement"
+    return None
 
 
 def iterative_refinement(
@@ -175,7 +319,90 @@ def iterative_refinement(
     #
     # Be careful to avoid infinite loops.
 
-    raise NotImplementedError("Implement iterative_refinement.")
+    if max_iterations < 1:
+        raise ValueError("max_iterations must be at least 1.")
+
+    # 1.
+    initial_evaluation = evaluation_func(initial_text)
+    initial_score = get_score(initial_evaluation, score_key)
+
+    current_text = initial_text
+    current_evaluation = initial_evaluation
+    current_score = initial_score
+
+    steps: list[RefinementStep] = []
+    iteration = 0
+    last_improved = True
+
+    # 2. The loop is bounded: iteration increases every pass and
+    #    should_continue stops at max_iterations.
+    while should_continue(
+        iteration=iteration,
+        max_iterations=max_iterations,
+        current_score=current_score,
+        target_score=target_score,
+        last_improved=last_improved,
+        stop_on_no_improvement=stop_on_no_improvement,
+    ):
+        iteration += 1
+
+        step = refine_once(
+            original_prompt,
+            current_text,
+            generation_func,
+            evaluation_func,
+            temperature=temperature,
+            top_p=top_p,
+            max_new_tokens=max_new_tokens,
+            score_key=score_key,
+            focus=focus,
+            preserve=preserve,
+            iteration=iteration,
+            current_evaluation=current_evaluation,
+            **kwargs,
+        )
+
+        # 3.
+        current_text, current_evaluation, accepted = choose_better_text(
+            current_text,
+            step.revised_text,
+            current_evaluation,
+            step.evaluation,
+            score_key=score_key,
+            require_improvement=require_improvement,
+        )
+        step.accepted = accepted
+        current_score = get_score(current_evaluation, score_key)
+
+        last_improved = step.revised_score > step.previous_score
+
+        # 4.
+        steps.append(step)
+
+    stopped_reason = _stop_reason(
+        iteration=iteration,
+        max_iterations=max_iterations,
+        current_score=current_score,
+        target_score=target_score,
+        last_improved=last_improved,
+        stop_on_no_improvement=stop_on_no_improvement,
+    )
+
+    # 5.
+    return {
+        "original_prompt": original_prompt,
+        "initial_text": initial_text,
+        "initial_evaluation": initial_evaluation,
+        "initial_score": initial_score,
+        "final_text": current_text,
+        "final_evaluation": current_evaluation,
+        "final_score": current_score,
+        "improvement": current_score - initial_score,
+        "iterations": steps,
+        "num_iterations": len(steps),
+        "accepted_count": sum(1 for s in steps if s.accepted),
+        "stopped_reason": stopped_reason,
+    }
 
 
 def summarize_refinement(result: dict) -> str:
@@ -190,4 +417,26 @@ def summarize_refinement(result: dict) -> str:
     # This is useful for debugging and for showing the tradeoff between extra
     # inference compute and output improvement.
 
-    raise NotImplementedError("Implement summarize_refinement.")
+    initial_score = float(result.get("initial_score", 0.0))
+    final_score = float(result.get("final_score", 0.0))
+    steps = result.get("iterations", [])
+    stopped_reason = result.get("stopped_reason") or "unknown"
+
+    lines = [
+        "Self-refinement summary",
+        "-----------------------",
+        f"Initial score: {initial_score:.3f}",
+        f"Final score:   {final_score:.3f}  ({final_score - initial_score:+.3f})",
+        f"Iterations:    {len(steps)}",
+        f"Accepted:      {sum(1 for s in steps if s.accepted)}/{len(steps)}",
+    ]
+
+    for step in steps:
+        status = "accepted" if step.accepted else "rejected"
+        lines.append(
+            f"  [{step.iteration}] {step.previous_score:.3f} -> "
+            f"{step.revised_score:.3f}  {status}"
+        )
+
+    lines.append(f"Stopped reason: {stopped_reason}")
+    return "\n".join(lines)
