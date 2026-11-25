@@ -19,6 +19,9 @@ from pathlib import Path
 from typing import Any, Protocol
 
 
+REQUIRED_FIELDS = ("prompt", "teacher_lyrics", "teacher_notes", "quality_score")
+
+
 class TokenizerLike(Protocol):
     def encode(self, text: str) -> list[int]:
         ...
@@ -147,7 +150,7 @@ def tokenize_text(tokenizer: TokenizerLike, text: str) -> list[int]:
     token_ids = tokenizer.encode(text)
 
     if not isinstance(token_ids, list) or not all(isinstance(t, int) for t in token_ids):
-        raise TypeError("tokenizer.encode must return a list of integers.")
+        raise ValueError("tokenizer.encode must return a list of integers.")
 
     return token_ids
 
@@ -231,7 +234,9 @@ def filter_teacher_examples(
     for example in examples:
         if example.quality_score < min_quality_score:
             continue
-        lyric_lines = [line for line in example.teacher_lyrics.splitlines() if line.strip()]
+        # Teacher output may contain escaped newlines (backslash + n) instead of real ones.
+        lyrics = example.teacher_lyrics.replace("\\n", "\n")
+        lyric_lines = [line for line in lyrics.splitlines() if line.strip()]
         if len(lyric_lines) < min_lyric_lines:
             continue
         kept.append(example)
@@ -306,7 +311,7 @@ def summarize_distillation_records(records: list[DistillationRecord]) -> str:
     # 4. Include average prompt length.
     # 5. Include average target length.
     if not records:
-        return "No distillation records."
+        return "No records to summarize."
 
     count = len(records)
     avg_input = sum(len(r.input_ids) for r in records) / count
